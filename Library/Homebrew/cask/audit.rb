@@ -634,6 +634,7 @@ module Cask
         Homebrew::Install.perform_preinstall_checks_once
         formula_installers = primary_container.dependencies.filter_map do |dep|
           next unless dep.is_a?(Formula)
+          next if dep.linked?
 
           FormulaInstaller.new(
             dep,
@@ -658,6 +659,10 @@ module Cask
         UnpackStrategy.detect(@tmpdir/nested_container, merge_xattrs: true)
                       .extract_nestedly(to: @tmpdir, verbose: false)
       end
+
+      # Propagate quarantine attributes from the downloaded file to extracted contents.
+      # This is necessary because some extraction tools (like 7zr) don't preserve xattrs.
+      Quarantine.propagate(from: downloaded_path, to: @tmpdir) if Quarantine.detect(downloaded_path)
 
       # Process rename operations after extraction
       # Create a temporary installer to process renames in the audit directory
@@ -794,7 +799,7 @@ module Cask
       bundle_min_os = cask_bundle_min_os
       sparkle_min_os = cask_sparkle_min_os
 
-      app_min_os = bundle_min_os || sparkle_min_os
+      app_min_os = [bundle_min_os, sparkle_min_os].compact.max
       debug_messages = []
       debug_messages << "from artifact: #{bundle_min_os.to_sym}" if bundle_min_os
       debug_messages << "from upstream: #{sparkle_min_os.to_sym}" if sparkle_min_os
@@ -883,7 +888,7 @@ module Cask
           if artifact.is_a?(Artifact::Pkg)
             pkg_expanded_dir = tmpdir/"pkg-expanded"
             begin
-              system_command!("pkgutil", args: ["--expand-full", path.to_s, pkg_expanded_dir.to_s])
+              system_command!("pkgutil", args: ["--expand", path.to_s, pkg_expanded_dir.to_s])
 
               distribution_file = pkg_expanded_dir/"Distribution"
               if File.exist?(distribution_file)
@@ -895,8 +900,6 @@ module Cask
               end
             rescue
               break
-            ensure
-              FileUtils.remove_entry(pkg_expanded_dir) if pkg_expanded_dir.exist?
             end
           end
 

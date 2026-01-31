@@ -30,6 +30,7 @@ module Homebrew
       @tty = T.let($stdout.tty?, T::Boolean)
       @spinner = T.let(nil, T.nilable(Spinner))
       @symlink_targets = T.let({}, T::Hash[Pathname, T::Set[Downloadable]])
+      @downloads_by_location = T.let({}, T::Hash[Pathname, Concurrent::Promises::Future])
     end
 
     sig {
@@ -45,7 +46,7 @@ module Homebrew
       targets = @symlink_targets.fetch(cached_location)
       targets << downloadable
 
-      downloads[downloadable] ||= Concurrent::Promises.future_on(
+      @downloads_by_location[cached_location] ||= Concurrent::Promises.future_on(
         pool, RetryableDownload.new(downloadable, tries:, pour:),
         force, quiet, check_attestation
       ) do |download, force, quiet, check_attestation|
@@ -56,6 +57,8 @@ module Homebrew
         end
         create_symlinks_for_shared_download(cached_location)
       end
+
+      downloads[downloadable] = @downloads_by_location.fetch(cached_location)
     end
 
     sig { void }
@@ -173,6 +176,8 @@ module Homebrew
       Context.current = context_before_fetch
 
       downloads.clear
+      @downloads_by_location.clear
+      @symlink_targets.clear
     end
 
     sig { params(message: String).void }
@@ -301,14 +306,14 @@ module Homebrew
       size_length = 5
       unit_length = 2
       size_formatting_string = "%<size>#{size_length}.#{precision}f%<unit>#{unit_length}s"
-      size, unit = disk_usage_readable_size_unit(fetched_size, precision:)
+      size, unit = Formatter.disk_usage_readable_size_unit(fetched_size, precision:)
       formatted_fetched_size = format(size_formatting_string, size:, unit:)
 
       total_size = downloadable.total_size
       formatted_total_size = if future.fulfilled?
         formatted_fetched_size
       elsif total_size
-        size, unit = disk_usage_readable_size_unit(total_size, precision:)
+        size, unit = Formatter.disk_usage_readable_size_unit(total_size, precision:)
         format(size_formatting_string, size:, unit:)
       else
         # fill in the missing spaces for the size if we don't have it yet.
