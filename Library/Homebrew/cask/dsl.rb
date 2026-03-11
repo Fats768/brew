@@ -594,6 +594,8 @@ module Cask
         raise CaskInvalidError.new(cask, "'no_autobump_defined' stanza may only appear once.")
       end
 
+      odeprecated "no_autobump! because: :requires_manual_review" if because == :requires_manual_review
+
       @no_autobump_defined = true
       @no_autobump_message = because
       @autobump = false
@@ -701,16 +703,11 @@ module Cask
     end
 
     def method_missing(method, *)
-      if method
-        Utils.method_missing_message(method, token)
-        nil
-      else
-        super
-      end
+      raise NoMethodError, "undefined method '#{method}' for Cask '#{token}'"
     end
 
     def respond_to_missing?(*)
-      true
+      false
     end
 
     sig { returns(T.nilable(MacOSVersion)) }

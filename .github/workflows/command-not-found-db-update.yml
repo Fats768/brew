@@ -26,7 +26,11 @@ jobs:
         uses: Homebrew/actions/setup-homebrew@main
 
       - name: Install oras for interacting with GitHub Packages
-        run: brew install oras
+        uses: Homebrew/actions/cache-homebrew-prefix@main
+        with:
+          install: oras
+          workflow-key: command-not-found-db-update
+          uninstall: true
 
       - name: Pull executables.txt from GitHub Packages
         run: oras pull ghcr.io/homebrew/command-not-found/executables:latest
@@ -69,7 +73,7 @@ jobs:
           shasum --algorithm=256 --check executables.txt.sha256
 
       - name: Upload database artifact
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: executables-database
           path: executables.txt

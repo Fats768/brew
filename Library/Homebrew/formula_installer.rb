@@ -46,7 +46,7 @@ class FormulaInstaller
   sig { returns(T::Boolean) }
   attr_accessor :link_keg
 
-  sig { returns(T.nilable(Homebrew::DownloadQueue)) }
+  sig { returns(Homebrew::DownloadQueue) }
   attr_accessor :download_queue
 
   sig {
@@ -113,7 +113,10 @@ class FormulaInstaller
     @overwrite = overwrite
     @keep_tmp = keep_tmp
     @debug_symbols = debug_symbols
-    @link_keg = T.let(!formula.keg_only? || link_keg, T::Boolean)
+    @installed_as_dependency = installed_as_dependency
+    @installed_on_request = installed_on_request
+    link_keg ||= !formula.keg_only? || auto_link_versioned_keg_only?
+    @link_keg = T.let(link_keg, T::Boolean)
     @show_header = show_header
     @ignore_deps = ignore_deps
     @only_deps = only_deps
@@ -131,8 +134,6 @@ class FormulaInstaller
     @verbose = verbose
     @quiet = quiet
     @debug = debug
-    @installed_as_dependency = installed_as_dependency
-    @installed_on_request = installed_on_request
     @options = options
     @requirement_messages = T.let([], T::Array[String])
     @poured_bottle = T.let(false, T::Boolean)
@@ -142,7 +143,7 @@ class FormulaInstaller
     @hold_locks = T.let(false, T::Boolean)
     @show_summary_heading = T.let(false, T::Boolean)
     @etc_var_preinstall = T.let([], T::Array[Pathname])
-    @download_queue = T.let(nil, T.nilable(Homebrew::DownloadQueue))
+    @download_queue = T.let(Homebrew.default_download_queue, Homebrew::DownloadQueue)
 
     # Take the original formula instance, which might have been swapped from an API instance to a source instance
     @formula = T.let(T.must(previously_fetched_formula), Formula) if previously_fetched_formula
@@ -295,11 +296,13 @@ class FormulaInstaller
   def install_bottle_for?(dep, build)
     return pour_bottle? if dep == formula
 
-    @build_from_source_formulae.exclude?(dep.full_name) &&
-      dep.bottle.present? &&
-      dep.pour_bottle? &&
-      build.used_options.empty? &&
-      dep.bottle&.compatible_locations?
+    (
+      @build_from_source_formulae.exclude?(dep.full_name) &&
+        dep.bottle.present? &&
+        dep.pour_bottle? &&
+        build.used_options.empty? &&
+        dep.bottle&.compatible_locations?
+    ) || false
   end
 
   sig { void }
@@ -323,9 +326,9 @@ class FormulaInstaller
 
     if pour_bottle?
       # Needs to be done before expand_dependencies for compute_dependencies
-      fetch_bottle_tab
+      fetch_bottle_tab(enqueue: true)
     elsif formula.loaded_from_api?
-      Homebrew::API::Formula.source_download(formula, download_queue:)
+      Homebrew::API::Formula.source_download(formula, download_queue:, enqueue: true)
     end
 
     fetch_fetch_deps unless ignore_deps?
@@ -343,10 +346,8 @@ class FormulaInstaller
     # bottle_built_os_version for dependency resolution.
     begin
       bottle_tab_attributes = formula.bottle_tab_attributes
-      @bottle_tab_runtime_dependencies = bottle_tab_attributes
-                                         .fetch("runtime_dependencies", []).then { |deps| deps || [] }
-                                         .each_with_object({}) { |dep, h| h[dep["full_name"]] = dep }
-                                         .freeze
+      raw_deps = bottle_tab_attributes.fetch("runtime_dependencies", []).then { |deps| deps || [] }
+      @bottle_tab_runtime_dependencies = raw_deps.to_h { |dep| [dep["full_name"], dep] }.freeze
 
       if (bottle_tag = formula.bottle_for_tag(Utils::Bottles.tag)&.tag) &&
          bottle_tag.system != :all
@@ -367,8 +368,7 @@ class FormulaInstaller
 
     check_install_sanity
 
-    # with the download queue: these should have already been installed
-    install_fetch_deps if !ignore_deps? && download_queue.nil?
+    install_fetch_deps if !ignore_deps? && Homebrew::EnvConfig.download_concurrency <= 1
   end
 
   sig { void }
@@ -727,7 +727,7 @@ on_request: installed_on_request?, options:)
     unsatisfied_reqs = Hash.new { |h, k| h[k] = [] }
     formulae = [formula]
     formula_deps_map = formula.recursive_dependencies
-                              .each_with_object({}) { |dep, h| h[dep.name] = dep }
+                              .to_h { |dep| [dep.name, dep] }
 
     while (f = formulae.pop)
       runtime_requirements = runtime_requirements(f)
@@ -842,7 +842,7 @@ on_request: installed_on_request?, options:)
     )
     fi.download_queue = download_queue
     fi.prelude
-    fi.fetch
+    fi.enqueue_fetch
   end
 
   sig { params(dep: Dependency).void }
@@ -938,6 +938,24 @@ on_request: installed_on_request?, options:)
     Homebrew.messages.record_caveats(formula.name, caveats)
   end
 
+  sig { returns(T.nilable(String)) }
+  def link_manual_command_warning
+    return if installed_as_dependency?
+    return unless formula.keg_only?
+    return unless formula.keg_only_reason.versioned_formula?
+    return if link_keg
+    return if formula.linked?
+
+    reason = formula.link_overwrite_reason
+    return if reason.blank?
+
+    <<~EOS
+      #{formula.full_name} was installed but not linked because #{reason}.
+      To link this version, run:
+        brew link #{formula.full_name}
+    EOS
+  end
+
   sig { void }
   def finish
     return if only_deps?
@@ -953,6 +971,8 @@ on_request: installed_on_request?, options:)
       end
     else
       link(keg)
+      warning = link_manual_command_warning
+      opoo warning if !quiet? && warning.present?
     end
 
     install_service
@@ -1163,7 +1183,7 @@ on_request: installed_on_request?, options:)
       keg.remove_linked_keg_record
     end
 
-    Homebrew::Unlink.unlink_versioned_formulae(formula, verbose: verbose?)
+    Homebrew::Unlink.unlink_link_overwrite_formulae(formula, verbose: verbose?)
 
     link_overwrite_backup = {} # Hash: conflict file -> backup file
     backup_dir = HOMEBREW_CACHE/"Backup"
@@ -1378,13 +1398,6 @@ on_request: installed_on_request?, options:)
 
     return if deps.empty?
 
-    unless download_queue
-      dependencies_string = deps.map { |dep| Formatter.identifier(dep) }
-                                .to_sentence
-      oh1 "Fetching dependencies for #{formula.full_name}: #{dependencies_string}",
-          truncate: false
-    end
-
     deps.each { fetch_dependency(it) }
   end
 
@@ -1400,13 +1413,13 @@ on_request: installed_on_request?, options:)
     end
   end
 
-  sig { params(quiet: T::Boolean).void }
-  def fetch_bottle_tab(quiet: false)
+  sig { params(quiet: T::Boolean, enqueue: T::Boolean).void }
+  def fetch_bottle_tab(quiet: false, enqueue: false)
     return if @fetch_bottle_tab
 
-    if (download_queue = self.download_queue) &&
-       (bottle = formula.bottle) &&
-       (manifest_resource = bottle.github_packages_manifest_resource)
+    if (bottle = formula.bottle) &&
+       (manifest_resource = bottle.github_packages_manifest_resource) &&
+       enqueue
       download_queue.enqueue(manifest_resource)
     else
       begin
@@ -1421,6 +1434,12 @@ on_request: installed_on_request?, options:)
 
   sig { void }
   def fetch
+    enqueue_fetch
+    download_queue.fetch
+  end
+
+  sig { void }
+  def enqueue_fetch
     return if previously_fetched_formula
 
     fetch_dependencies
@@ -1428,22 +1447,15 @@ on_request: installed_on_request?, options:)
     return if only_deps?
     return if formula.local_bottle_path.present?
 
-    oh1 "Fetching #{Formatter.identifier(formula.full_name)}".strip unless download_queue
-
     downloadable_object = downloadable
     check_attestation = if pour_bottle?(output_warning: true)
-      fetch_bottle_tab
+      fetch_bottle_tab(enqueue: true)
 
       !downloadable_object.cached_download.exist?
     else
       @formula = Homebrew::API::Formula.source_download_formula(formula) if formula.loaded_from_api?
 
-      if (download_queue = self.download_queue)
-        formula.enqueue_resources_and_patches(download_queue:)
-      else
-        formula.fetch_patches
-        formula.resources.each(&:fetch)
-      end
+      formula.enqueue_resources_and_patches(download_queue:)
 
       downloadable_object = downloadable
 
@@ -1457,15 +1469,8 @@ on_request: installed_on_request?, options:)
     check_attestation &&= Homebrew::Attestation.enabled? &&
                           (formula.tap&.core_tap? || false) &&
                           formula.name != "gh"
-    if (download_queue = self.download_queue)
-      # Check attestation after download completes.
-      download_queue.enqueue(downloadable_object, check_attestation:)
-    else
-      downloadable_object.fetch
-      if check_attestation && downloadable_object.is_a?(Bottle)
-        Utils::Attestation.check_attestation(downloadable_object, quiet: @quiet)
-      end
-    end
+    # Check attestation after download completes.
+    download_queue.enqueue(downloadable_object, check_attestation:)
 
     self.class.fetched << formula
   rescue CannotInstallFormulaError
@@ -1495,7 +1500,7 @@ on_request: installed_on_request?, options:)
       formula.rack.mkpath
 
       # Download queue may have already extracted the bottle to a temporary directory.
-      # We cannot check `download_queue` as it is nil when pouring dependencies.
+      # We cannot rely on `download_queue` here as dependencies may be poured by another installer.
       formula_prefix_relative_to_cellar = formula.prefix.relative_path_from(HOMEBREW_CELLAR)
       bottle_tmp_keg = HOMEBREW_TEMP_CELLAR/formula_prefix_relative_to_cellar
       bottle_poured_file = Pathname("#{bottle_tmp_keg}.poured")
@@ -1716,6 +1721,17 @@ on_request: installed_on_request?, options:)
   end
 
   private
+
+  sig { returns(T::Boolean) }
+  def auto_link_versioned_keg_only?
+    return false if installed_as_dependency?
+    return false unless formula.keg_only?
+    return false unless formula.keg_only_reason.versioned_formula?
+    return false if formula.any_version_installed?
+    return false if formula.link_overwrite_formulae.any?(&:any_version_installed?)
+
+    true
+  end
 
   sig { void }
   def lock

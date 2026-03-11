@@ -152,8 +152,21 @@ module Cask
         if !self.class.invalid_path?(path, valid_extnames: %w[.json]) &&
            (from_json = JSON.parse(@content).presence) &&
            from_json.is_a?(Hash)
-          return FromAPILoader.new(token, from_json:, path:,
-from_installed_caskfile: @from_installed_caskfile).load(config:)
+          begin
+            return FromAPILoader.new(
+              token,
+              from_json:,
+              path:,
+              from_installed_caskfile: @from_installed_caskfile,
+            ).load(config:)
+          rescue CaskInvalidError => e
+            if @from_installed_caskfile
+              error = CaskUnreadableError.new(token, e.reason)
+              error.set_backtrace e.backtrace
+              raise error
+            end
+            raise
+          end
         end
 
         begin
@@ -164,6 +177,14 @@ from_installed_caskfile: @from_installed_caskfile).load(config:)
           error = CaskUnreadableError.new(token, e.message)
           error.set_backtrace e.backtrace
           raise error
+        rescue CaskInvalidError => e # e.g. NoMethodError from removed DSL methods, wrapped
+          # as CaskInvalidError by Cask#refresh before reaching here.
+          if @from_installed_caskfile
+            error = CaskUnreadableError.new(token, e.reason)
+            error.set_backtrace e.backtrace
+            raise error
+          end
+          raise
         end
       end
 
@@ -341,13 +362,11 @@ from_installed_caskfile: @from_installed_caskfile).load(config:)
 
       def load(config:)
         json_cask = from_json
-        json_cask ||= if Homebrew::EnvConfig.use_internal_api?
-          Homebrew::API::Internal.cask_hashes.fetch(token)
-        else
-          Homebrew::API::Cask.all_casks.fetch(token)
-        end
+        json_cask ||= Homebrew::API::Cask.all_casks.fetch(token)
 
-        cask_struct = Homebrew::API::Cask.generate_cask_struct_hash(json_cask, ignore_types: @from_installed_caskfile)
+        cask_struct = Homebrew::API::Cask::CaskStructGenerator.generate_cask_struct_hash(
+          json_cask, ignore_types: @from_installed_caskfile
+        )
 
         cask_options = {
           loaded_from_api: true,
@@ -357,6 +376,8 @@ from_installed_caskfile: @from_installed_caskfile).load(config:)
           config:,
           loader:          self,
         }
+
+        tap_git_head = json_cask["tap_git_head"]
 
         if (tap_string = cask_struct.tap_string)
           cask_options[:tap] = Tap.fetch(tap_string)
@@ -401,7 +422,7 @@ from_installed_caskfile: @from_installed_caskfile).load(config:)
 
           caveats cask_struct.caveats(appdir:) if cask_struct.caveats?
         end
-        api_cask.populate_from_api!(cask_struct)
+        api_cask.populate_from_api!(cask_struct, tap_git_head:)
         api_cask
       end
     end

@@ -104,7 +104,7 @@ module Cask
           #       before using `sudo` and `chown`.
           ohai "Using sudo to gain ownership of path '#{path}'"
           command.run("chown",
-                      args: command_args + ["--", User.current, path],
+                      args: command_args + ["--", User.current.to_s, path],
                       sudo: true)
           tried_ownership = true
           # retry chflags/chmod after chown
@@ -138,15 +138,6 @@ module Cask
         Follow the instructions here:
           #{Formatter.url(BUG_REPORTS_URL)}
       EOS
-    end
-
-    sig { params(method: Symbol, token: String, section: T.nilable(String)).void }
-    def self.method_missing_message(method, token, section = nil)
-      message = "Unexpected method '#{method}' called "
-      message << "during #{section} " if section
-      message << "on Cask #{token}."
-
-      ofail "#{message}\n#{error_message_with_suggestions}"
     end
   end
 end

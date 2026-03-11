@@ -409,7 +409,7 @@ module Cask
 
     sig { void }
     def audit_generic_artifacts
-      cask.artifacts.select { |a| a.is_a?(Artifact::Artifact) }.each do |artifact|
+      cask.artifacts.grep(Artifact::Artifact).each do |artifact|
         unless artifact.target.absolute?
           add_error "target must be absolute path for #{artifact.class.english_name} #{artifact.source}"
         end
@@ -775,10 +775,15 @@ module Cask
         return @livecheck_result
       end
 
-      latest_version = Homebrew::Livecheck.latest_version(
+      result = Homebrew::Livecheck.latest_version(
         cask,
         referenced_formula_or_cask: referenced_cask,
-      )&.fetch(:latest, nil)
+      )
+      if result
+        throttle = cask.livecheck.throttle
+        throttle ||= referenced_cask.livecheck.throttle if referenced_cask
+        latest_version = throttle ? result[:latest_throttled] : result[:latest]
+      end
 
       if latest_version && (cask.version.to_s == latest_version.to_s)
         @livecheck_result = :auto_detected
@@ -1081,7 +1086,8 @@ module Cask
 
       odebug "Auditing GitHub repo"
 
-      error = SharedAudits.github(user, repo)
+      self_submission = self_submission?(user)
+      error = SharedAudits.github(user, repo, self_submission:)
       add_error error, location: url.location if error
     end
 
@@ -1095,7 +1101,8 @@ module Cask
 
       odebug "Auditing GitLab repo"
 
-      error = SharedAudits.gitlab(user, repo)
+      self_submission = self_submission?(user)
+      error = SharedAudits.gitlab(user, repo, self_submission:)
       add_error error, location: url.location if error
     end
 
@@ -1109,7 +1116,8 @@ module Cask
 
       odebug "Auditing Bitbucket repo"
 
-      error = SharedAudits.bitbucket(user, repo)
+      self_submission = self_submission?(user)
+      error = SharedAudits.bitbucket(user, repo, self_submission:)
       add_error error, location: url.location if error
     end
 
@@ -1123,7 +1131,8 @@ module Cask
 
       odebug "Auditing Forgejo repo"
 
-      error = SharedAudits.forgejo(user, repo)
+      self_submission = self_submission?(user)
+      error = SharedAudits.forgejo(user, repo, self_submission:)
       add_error error, location: url.location if error
     end
 
@@ -1233,15 +1242,6 @@ module Cask
       add_error error if error
     end
 
-    sig { void }
-    def audit_no_autobump
-      return if cask.autobump?
-      return unless new_cask?
-
-      error = SharedAudits.no_autobump_new_package_message(cask.no_autobump_message)
-      add_error error if error
-    end
-
     sig {
       params(
         url_to_check: T.any(String, URL),
@@ -1273,6 +1273,13 @@ module Cask
       repo.gsub!(/.git$/, "")
 
       [user, repo]
+    end
+
+    sig { params(repo_owner: String).returns(T::Boolean) }
+    def self_submission?(repo_owner)
+      return false if repo_owner.empty?
+
+      SharedAudits.self_submission_for_repo_owner?(repo_owner)
     end
 
     sig {

@@ -17,7 +17,6 @@ module Homebrew
       :project_leader,
       :lead_maintainers,
       :maintainers,
-      keyword_init: true,
     )
 
     SOURCE_PATH = T.let((HOMEBREW_LIBRARY_PATH/"manpages").freeze, Pathname)
@@ -55,13 +54,13 @@ module Homebrew
         global_options:        global_options_manpage,
         environment_variables: env_vars_manpage,
         project_leader:        readme.read[/(Homebrew's \[Project Leader.*\.)/, 1]
-                                     .gsub(/\[([^\]]+)\]\([^)]+\)/, '\1'),
+                               .gsub(/\[([^\]]+)\]\([^)]+\)/, '\1'),
         lead_maintainers:      readme.read[/(Homebrew's \[Lead Maintainers.*\.)/, 1]
-                                     .gsub(/\[([^\]]+)\]\([^)]+\)/, '\1'),
+                               .gsub(/\[([^\]]+)\]\([^)]+\)/, '\1'),
         maintainers:           readme.read[/(Homebrew's other Maintainers .*\.)/, 1]
-                                     .gsub(/\[([^\]]+)\]\([^)]+\)/, '\1'),
+                               .gsub(/\[([^\]]+)\]\([^)]+\)/, '\1'),
         alumni:                readme.read[/(Former Maintainers .*\.)/, 1]
-                                     .gsub(/\[([^\]]+)\]\([^)]+\)/, '\1'),
+                               .gsub(/\[([^\]]+)\]\([^)]+\)/, '\1'),
       )
 
       ERB.new(template, trim_mode: ">").result(variables.instance_eval { binding })

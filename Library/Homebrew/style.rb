@@ -40,6 +40,7 @@ module Homebrew
 
     def self.check_style_impl(files, output_type,
                               fix: false,
+                              todo: false,
                               except_cops: nil, only_cops: nil,
                               display_cop_names: false,
                               reset_cache: false,
@@ -75,6 +76,7 @@ module Homebrew
       else
         run_rubocop(ruby_files, output_type,
                     fix:,
+                    todo:,
                     except_cops:, only_cops:,
                     display_cop_names:,
                     reset_cache:,
@@ -108,7 +110,8 @@ module Homebrew
     RUBOCOP = (HOMEBREW_LIBRARY_PATH/"utils/rubocop.rb").freeze
 
     def self.run_rubocop(files, output_type,
-                         fix: false, except_cops: nil, only_cops: nil, display_cop_names: false, reset_cache: false,
+                         fix: false, todo: false, except_cops: nil, only_cops: nil, display_cop_names: false,
+                         reset_cache: false,
                          debug: false, verbose: false)
       require "warnings"
 
@@ -122,6 +125,7 @@ module Homebrew
         --force-exclusion
       ]
       args << "--autocorrect-all" if fix
+      args << "--disable-uncorrectable" if todo
 
       args += ["--extra-details"] if verbose
 
@@ -328,21 +332,18 @@ module Homebrew
 
     def self.shellcheck
       require "formula"
-      shellcheck_stub = Formulary.factory_stub("shellcheck")
-      shellcheck_stub.ensure_installed!(latest: true, reason: "shell style checks").opt_bin/"shellcheck"
+      Formula["shellcheck"].ensure_installed!(latest: true, reason: "shell style checks").opt_bin/"shellcheck"
     end
 
     def self.shfmt
       require "formula"
-      shfmt_stub = Formulary.factory_stub("shfmt")
-      shfmt_stub.ensure_installed!(latest: true, reason: "formatting shell scripts")
+      Formula["shfmt"].ensure_installed!(latest: true, reason: "formatting shell scripts")
       HOMEBREW_LIBRARY/"Homebrew/utils/shfmt.sh"
     end
 
     def self.actionlint
       require "formula"
-      actionlint_stub = Formulary.factory_stub("actionlint")
-      actionlint_stub.ensure_installed!(latest: true, reason: "GitHub Actions checks").opt_bin/"actionlint"
+      Formula["actionlint"].ensure_installed!(latest: true, reason: "GitHub Actions checks").opt_bin/"actionlint"
     end
 
     # Collection of style offenses.

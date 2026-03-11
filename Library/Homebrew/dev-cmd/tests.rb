@@ -230,7 +230,8 @@ module Homebrew
       def changed_test_files
         changed_files = Utils.popen_read("git", "diff", "--name-only", "main")
 
-        raise UsageError, "No files have been changed from the `main` branch!" if changed_files.blank?
+        odebug "No files have been changed from the `main` branch." if changed_files.blank?
+        return [] if changed_files.blank?
 
         filestub_regex = %r{Library/Homebrew/([\w/-]+).rb}
         T.cast(changed_files.scan(filestub_regex), T::Array[T::Array[String]])
@@ -263,6 +264,9 @@ module Homebrew
 
           ENV.delete(env)
         end
+
+        # TODO: remove this once we kill `HOMEBREW_REALLY_USE_INTERNAL_API`.
+        ENV.delete("HOMEBREW_REALLY_USE_INTERNAL_API")
 
         # Fetch JSON API files if needed.
         require "api"

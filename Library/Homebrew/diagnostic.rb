@@ -146,15 +146,15 @@ module Homebrew
         return if tier.to_s == "1"
 
         tier_title, tier_slug, tier_issues = if tier.to_s == "unsupported"
-          ["Unsupported", "unsupported", "Do not report any"]
+          ["Unsupported", "unsupported", "Do not report any issues"]
         else
-          ["Tier #{tier}", "tier-#{tier.to_s.downcase}", "You can report Tier #{tier} unrelated"]
+          ["Tier #{tier}", "tier-#{tier.to_s.downcase}", "You can report issues with Tier #{tier} configurations"]
         end
 
         <<~EOS
           This is a #{tier_title} configuration:
             #{Formatter.url("https://docs.brew.sh/Support-Tiers##{tier_slug}")}
-          #{Formatter.bold("#{tier_issues} issues to Homebrew/* repositories!")}
+          #{Formatter.bold("#{tier_issues} to Homebrew/* repositories!")}
           Read the above document before opening any issues or PRs.
         EOS
       end
@@ -244,6 +244,7 @@ module Homebrew
           "libfuse.2.dylib", # MacFuse
           "libfuse3.*.dylib", # MacFuse
           "libfuse_ino64.2.dylib", # MacFuse
+          "libfuse-t*.dylib", # FUSE-T
           "libmacfuse_i32.2.dylib", # OSXFuse MacFuse compatibility layer
           "libmacfuse_i64.2.dylib", # OSXFuse MacFuse compatibility layer
           "libosxfuse_i32.2.dylib", # OSXFuse
@@ -275,6 +276,7 @@ module Homebrew
         # Static libs which are generally OK should be added to this list,
         # with a short description of the software they come with.
         allow_list = [
+          "libfuse-t*.a", # FUSE-T
           "libntfs-3g.a", # NTFS-3G
           "libntfs.a", # NTFS-3G
           "libublio.a", # NTFS-3G
@@ -303,6 +305,7 @@ module Homebrew
         allow_list = [
           "fuse.pc", # OSXFuse/MacFuse
           "fuse3.pc", # OSXFuse/MacFuse
+          "fuse-t.pc", # FUSE-T
           "macfuse.pc", # OSXFuse MacFuse compatibility layer
           "osxfuse.pc", # OSXFuse
           "libntfs-3g.pc", # NTFS-3G

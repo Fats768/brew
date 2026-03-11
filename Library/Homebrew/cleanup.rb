@@ -166,7 +166,10 @@ module Homebrew
 
           return true if (bottle = formula.bottle).blank?
 
-          return version != GitHubPackages.version_rebuild(bottle.resource.version, bottle.rebuild)
+          resource_version = bottle.resource.version
+          return false unless resource_version
+
+          return version != GitHubPackages.version_rebuild(resource_version, bottle.rebuild)
         end
 
         return false if formula.blank?
@@ -546,12 +549,15 @@ module Homebrew
 
       lockfiles.each do |file|
         next unless file.readable?
-        next unless file.open(File::RDWR).flock(File::LOCK_EX | File::LOCK_NB)
 
-        begin
-          file.unlink
-        ensure
-          file.open(File::RDWR).flock(File::LOCK_UN) if file.exist?
+        file.open(File::RDWR) do |lockfile|
+          next unless lockfile.flock(File::LOCK_EX | File::LOCK_NB)
+
+          begin
+            file.unlink
+          ensure
+            lockfile.flock(File::LOCK_UN) if file.exist?
+          end
         end
       end
     end

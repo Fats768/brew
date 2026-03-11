@@ -690,12 +690,14 @@ _brew_bundle() {
       --no-restart
       --no-secrets
       --no-upgrade
+      --no-uv
       --no-vscode
       --quiet
       --services
       --tap
       --upgrade
       --upgrade-formulae
+      --uv
       --verbose
       --vscode
       --zap
@@ -1346,6 +1348,23 @@ _brew_generate_man_completions() {
       --debug
       --help
       --no-exit-code
+      --quiet
+      --verbose
+      "
+      return
+      ;;
+    *) ;;
+  esac
+}
+
+_brew_generate_zap() {
+  local cur="${COMP_WORDS[COMP_CWORD]}"
+  case "${cur}" in
+    -*)
+      __brewcomp "
+      --debug
+      --help
+      --name
       --quiet
       --verbose
       "
@@ -2512,6 +2531,7 @@ _brew_style() {
       --only-cops
       --quiet
       --reset-cache
+      --todo
       --verbose
       "
       return
@@ -3408,6 +3428,7 @@ _brew() {
     generate-cask-ci-matrix) _brew_generate_cask_ci_matrix ;;
     generate-formula-api) _brew_generate_formula_api ;;
     generate-man-completions) _brew_generate_man_completions ;;
+    generate-zap) _brew_generate_zap ;;
     gist-logs) _brew_gist_logs ;;
     home) _brew_home ;;
     homepage) _brew_homepage ;;

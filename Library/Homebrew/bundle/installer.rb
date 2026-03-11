@@ -8,6 +8,7 @@ require "bundle/mac_app_store_installer"
 require "bundle/vscode_extension_installer"
 require "bundle/go_installer"
 require "bundle/cargo_installer"
+require "bundle/uv_installer"
 require "bundle/flatpak_installer"
 require "bundle/tap_installer"
 require "bundle/skipper"
@@ -58,6 +59,9 @@ module Homebrew
             Homebrew::Bundle::GoInstaller
           when :cargo
             Homebrew::Bundle::CargoInstaller
+          when :uv
+            options = entry.options
+            Homebrew::Bundle::UvInstaller
           when :flatpak
             options = entry.options
             Homebrew::Bundle::FlatpakInstaller
@@ -73,7 +77,7 @@ module Homebrew
 
         if (fetchable_names = fetchable_formulae_and_casks(installable_entries, no_upgrade:).presence)
           fetchable_names_joined = fetchable_names.join(", ")
-          Formatter.success("Fetching #{fetchable_names_joined}") unless quiet
+          puts Formatter.success("Fetching #{fetchable_names_joined}") unless quiet
           unless Bundle.brew("fetch", *fetchable_names, verbose:)
             $stderr.puts Formatter.error "`brew bundle` failed! Failed to fetch #{fetchable_names_joined}"
             return false

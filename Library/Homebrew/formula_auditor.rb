@@ -673,7 +673,8 @@ module Homebrew
 
       return if user.blank?
 
-      warning = SharedAudits.github(user, repo)
+      self_submission = self_submission?(user)
+      warning = SharedAudits.github(user, repo, self_submission:)
       return if warning.nil?
 
       new_formula_problem warning
@@ -683,7 +684,8 @@ module Homebrew
       user, repo = get_repo_data(%r{https?://gitlab\.com/([^/]+)/([^/]+)/?.*}) if @new_formula
       return if user.blank?
 
-      warning = SharedAudits.gitlab(user, repo)
+      self_submission = self_submission?(user)
+      warning = SharedAudits.gitlab(user, repo, self_submission:)
       return if warning.nil?
 
       new_formula_problem warning
@@ -693,7 +695,8 @@ module Homebrew
       user, repo = get_repo_data(%r{https?://bitbucket\.org/([^/]+)/([^/]+)/?.*}) if @new_formula
       return if user.blank?
 
-      warning = SharedAudits.bitbucket(user, repo)
+      self_submission = self_submission?(user)
+      warning = SharedAudits.bitbucket(user, repo, self_submission:)
       return if warning.nil?
 
       new_formula_problem warning
@@ -704,7 +707,8 @@ module Homebrew
       user, repo = get_repo_data(%r{https?://codeberg\.org/([^/]+)/([^/]+)/?.*}) if @new_formula
       return if user.blank?
 
-      warning = SharedAudits.forgejo(user, repo)
+      self_submission = self_submission?(user)
+      warning = SharedAudits.forgejo(user, repo, self_submission:)
       return if warning.nil?
 
       new_formula_problem warning
@@ -959,6 +963,7 @@ module Homebrew
 
       compatibility_increment = current_compatibility_version - previous_compatibility_version
       return if compatibility_increment.zero?
+      return unless formula.valid_platform?
 
       dependent_revision_bumps = changed_formulae_paths(tap).filter_map do |path|
         changed_formula = Formulary.factory(path)
@@ -1074,15 +1079,6 @@ module Homebrew
       problem error if error
     end
 
-    def audit_no_autobump
-      return if formula.autobump?
-
-      return unless @new_formula_inclusive
-
-      error = SharedAudits.no_autobump_new_package_message(formula.no_autobump_message)
-      new_formula_problem error if error
-    end
-
     def quote_dep(dep)
       dep.is_a?(Symbol) ? dep.inspect : "'#{dep}'"
     end
@@ -1112,6 +1108,12 @@ module Homebrew
 
     def new_formula_problem(message, location: nil, corrected: false)
       @new_formula_problems << ({ message:, location:, corrected: })
+    end
+
+    def self_submission?(repo_owner)
+      return false if repo_owner.blank?
+
+      SharedAudits.self_submission_for_repo_owner?(repo_owner)
     end
 
     def head_only?(formula)
@@ -1208,7 +1210,7 @@ module Homebrew
             origin_head_version_info[:version_scheme] ||= previous_version_info[:version_scheme]
             origin_head_version_info[:compatibility_version] ||= previous_version_info[:compatibility_version]
           end
-        rescue MacOSVersion::Error
+        rescue MacOSVersion::Error, LegacyDSLError
           break
         end
 

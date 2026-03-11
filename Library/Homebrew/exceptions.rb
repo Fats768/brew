@@ -1,6 +1,9 @@
 # typed: true # rubocop:todo Sorbet/StrictSigil
 # frozen_string_literal: true
 
+# We intentionally want to have many exceptions in this file.
+# rubocop:disable Style/OneClassPerFile
+
 require "utils/output"
 
 # Raised when a command is used wrong.
@@ -74,6 +77,15 @@ class FormulaValidationError < StandardError
     @attr = attr
     @formula = formula
     super "invalid attribute for formula '#{formula}': #{attr} (#{value.inspect})"
+  end
+end
+
+class LegacyDSLError < StandardError
+  attr_reader :attr
+
+  def initialize(attr, value)
+    @attr = attr
+    super "A legacy DSL was used: #{attr} (#{value.inspect})"
   end
 end
 
@@ -803,3 +815,5 @@ class CyclicDependencyError < RuntimeError
     EOS
   end
 end
+
+# rubocop:enable Style/OneClassPerFile

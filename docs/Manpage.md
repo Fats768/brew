@@ -137,8 +137,8 @@ and are now no longer needed.
 ### `bundle` \[*`subcommand`*\]
 
 Bundler for non-Ruby dependencies from Homebrew, Homebrew Cask, Mac App Store,
-Visual Studio Code (and forks/variants), Go packages, Cargo packages and
-Flatpak.
+Visual Studio Code (and forks/variants), Go packages, Cargo packages, uv tools
+and Flatpak.
 
 Note: Flatpak support is only available on Linux.
 
@@ -193,12 +193,12 @@ By default, only Homebrew formula dependencies are listed.
 `brew bundle add` *`name`* \[...\]
 
 : Add entries to your `Brewfile`. Adds formulae by default. Use `--cask`,
-  `--tap` or `--vscode` to add the corresponding entry instead.
+  `--tap`, `--vscode` or `--uv` to add the corresponding entry instead.
 
 `brew bundle remove` *`name`* \[...\]
 
 : Remove entries that match `name` from your `Brewfile`. Use `--formula`,
-  `--cask`, `--tap`, `--mas` or `--vscode` to remove only entries of the
+  `--cask`, `--tap`, `--mas`, `--vscode` or `--uv` to remove only entries of the
   corresponding type. Passing `--formula` also removes matches against formula
   aliases and old formula names.
 
@@ -307,6 +307,10 @@ flags which will help with finding keg-only dependencies like `openssl`,
 
 : `list` or `dump` Cargo packages.
 
+`--uv`
+
+: `list` or `dump` uv tools.
+
 `--flatpak`
 
 : `list` or `dump` Flatpak packages. Note: Linux only.
@@ -325,6 +329,11 @@ flags which will help with finding keg-only dependencies like `openssl`,
 
 : `dump` without Cargo packages. Enabled by default if
   `$HOMEBREW_BUNDLE_DUMP_NO_CARGO` is set.
+
+`--no-uv`
+
+: `dump` without uv tools. Enabled by default if `$HOMEBREW_BUNDLE_DUMP_NO_UV`
+  is set.
 
 `--no-flatpak`
 
@@ -2800,6 +2809,25 @@ Generate Homebrew's manpages and shell completions.
 
 : Exit with code 0 even if no changes were made.
 
+### `generate-zap` \[`--name`\] *`cask_or_name`*
+
+Generate a `zap` stanza for a cask by scanning the system for associated files
+and directories.
+
+Accepts a cask token (e.g. `firefox`) or, with `--name`, a raw application name
+string (e.g. `Firefox`). When a cask token is given, the application name is
+resolved from the cask's `app` artifact.
+
+The target application should have been launched at least once so that
+preference files and caches exist on disk.
+
+Outputs `trash`, `delete`, and `rmdir` directives suitable for pasting into a
+cask definition.
+
+`--name`
+
+: Treat the argument as a raw application name instead of a cask token.
+
 ### `install-bundler-gems` \[`--groups=`\] \[`--add-groups=`\]
 
 Install Homebrew's Bundler gems.
@@ -3225,6 +3253,11 @@ core code and all formulae.
 `--fix`
 
 : Fix style violations automatically using RuboCop's auto-correct feature.
+
+`--todo`
+
+: Add `rubocop:todo` comments for RuboCop violations that remain after
+  auto-correction. Requires `--fix`.
 
 `--reset-cache`
 

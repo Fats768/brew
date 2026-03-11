@@ -20,6 +20,8 @@ inherit_mode:
     - Exclude
 
 AllCops:
+  # Only bump this after the first tagged brew release with a new Ruby version,
+  # otherwise taps will be prompted to use newer Ruby syntax too early.
   TargetRubyVersion: 3.4
   NewCops: enable
   Include:
@@ -378,6 +380,18 @@ Style/FetchEnvVar:
     - "Taps/*/*/*.rb"
     - "/**/Formula/**/*.rb"
     - "**/Formula/**/*.rb"
+
+# Doesn't make sense for formulae with e.g. requirements.
+Style/OneClassPerFile:
+  Exclude:
+    - "**/*.rbi"
+    - "Taps/*/*/*.rb"
+    - "/**/Abstract/**/*.rb"
+    - "**/Abstract/**/*.rb"
+    - "/**/Formula/**/*.rb"
+    - "**/Formula/**/*.rb"
+    - "/**/developer/bin/*"
+    - "**/developer/bin/*"
 
 # Not used for casks and formulae.
 Style/FrozenStringLiteralComment:

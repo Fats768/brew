@@ -1453,6 +1453,19 @@ RSpec.describe Homebrew::FormulaAuditor do
 
         expect(auditor.problems).to be_empty
       end
+
+      it "ignores missing dependent revision bumps for unsupported platform" do
+        allow(target_formula).to receive(:valid_platform?).and_return(false)
+        stub_committed_info(
+          auditor,
+          default:   [{ compatibility_version: 1 }, { compatibility_version: 1 }],
+          overrides: { dependent_formula => [{ revision: 2 }, { revision: 2 }] },
+        )
+
+        auditor.audit_compatibility_version
+
+        expect(auditor.problems).to be_empty
+      end
     end
   end
 
@@ -1724,36 +1737,6 @@ RSpec.describe Homebrew::FormulaAuditor do
       mkdir_p fa.formula.prefix
       fa.audit_deprecate_disable
       expect(fa.problems).to be_empty
-    end
-  end
-
-  describe "#audit_no_autobump" do
-    it "warns when autobump exclusion reason is not suitable for new formula" do
-      fa = formula_auditor "foo", <<~RUBY, new_formula: true
-        class Foo < Formula
-          url "https://brew.sh/foo-1.0.tgz"
-
-          no_autobump! because: :requires_manual_review
-        end
-      RUBY
-
-      fa.audit_no_autobump
-      expect(fa.new_formula_problems.first[:message])
-        .to match("`:requires_manual_review` is a temporary reason intended for existing packages, " \
-                  "use a different reason instead.")
-    end
-
-    it "does not warn when autobump exclusion reason is allowed" do
-      fa = formula_auditor "foo", <<~RUBY, new_formula: true
-        class Foo < Formula
-          url "https://brew.sh/foo-1.0.tgz"
-
-          no_autobump! because: "foo bar"
-        end
-      RUBY
-
-      fa.audit_no_autobump
-      expect(fa.new_formula_problems).to be_empty
     end
   end
 end

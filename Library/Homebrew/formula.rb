@@ -590,33 +590,11 @@ class Formula
   # @see .loaded_from_api?
   delegate loaded_from_api?: :"self.class"
 
-  # Whether this formula was loaded using the formulae.brew.sh API.
-  # @!method loaded_from_stub?
-  # @see .loaded_from_stub?
-  delegate loaded_from_stub?: :"self.class"
-
   # The API source data used to load this formula.
   # Returns `nil` if the formula was not loaded from the API.
   # @!method api_source
   # @see .api_source
   delegate api_source: :"self.class"
-
-  sig { returns(Formula) }
-  def fully_loaded_formula
-    @fully_loaded_formula ||= if loaded_from_stub?
-      json_contents = Homebrew::API::Formula.formula_json(name)
-      Formulary.from_json_contents(name, json_contents)
-    else
-      self
-    end
-  end
-
-  sig { params(download_queue: T.nilable(Homebrew::DownloadQueue)).void }
-  def fetch_fully_loaded_formula!(download_queue: nil)
-    return unless loaded_from_stub?
-
-    Homebrew::API::Formula.fetch_formula_json!(name, download_queue:)
-  end
 
   sig { void }
   def update_head_version
@@ -648,15 +626,18 @@ class Formula
   # Returns any other `@`-versioned formulae names for any Formula (including versioned formulae).
   sig { returns(T::Array[String]) }
   def versioned_formulae_names
-    versioned_names = if tap
-      name_prefix = name.gsub(/(@[\d.]+)?$/, "")
-      T.must(tap).prefix_to_versioned_formulae_names.fetch(name_prefix, [])
-    elsif path.exist?
-      Pathname.glob(path.to_s.gsub(/(@[\d.]+)?\.rb$/, "@*.rb"))
-              .map { |path| path.basename(".rb").to_s }
-              .sort
+    name_prefix = unversioned_formula_name || name
+
+    versioned_names = if (formula_tap = tap)
+      formula_tap.prefix_to_versioned_formulae_names.fetch(name_prefix, [])
     else
-      raise "Either tap or path is required to list versioned formulae"
+      versioned_formula_glob = if name_prefix.end_with?("-full")
+        "#{name_prefix.delete_suffix("-full")}@*-full.rb"
+      else
+        "#{name_prefix}@*.rb"
+      end
+
+      formula_names_for_glob(versioned_formula_glob)
     end
 
     versioned_names.reject do |versioned_name|
@@ -674,6 +655,146 @@ class Formula
     end.sort_by(&:version).reverse
   end
 
+  sig { returns(T.nilable(String)) }
+  def unversioned_formula_name
+    return unless versioned_formula?
+
+    name.sub(/@[\d.]+(?=-full$|$)/, "")
+  end
+
+  sig { params(glob: String).returns(T::Array[String]) }
+  def formula_names_for_glob(glob)
+    @formula_names_for_glob ||= T.let({}, T.nilable(T::Hash[String, T::Array[String]]))
+    @formula_names_for_glob[glob] ||= if (formula_tap = tap)
+      formula_name = File.basename(glob, ".rb")
+      if formula_tap.formula_files_by_name.key?(formula_name)
+        [formula_name]
+      else
+        []
+      end
+    elsif path.exist?
+      Pathname.glob((path.dirname/glob).to_s)
+              .map { |path| path.basename(".rb").to_s }
+              .sort
+    else
+      raise "Either tap or path is required to list sibling formulae"
+    end
+  end
+  private :formula_names_for_glob
+
+  # Returns the sibling `-full` or non-`-full` formula names for any Formula.
+  sig { returns(T::Array[String]) }
+  def full_formulae_names
+    sibling_name = if name.end_with?("-full")
+      name.delete_suffix("-full")
+    else
+      "#{name}-full"
+    end
+
+    formula_names_for_glob("#{sibling_name}.rb")
+  end
+
+  # Returns sibling `-full` or non-`-full` Formula objects for any Formula.
+  sig { returns(T::Array[Formula]) }
+  def full_formulae
+    full_formulae_names.filter_map do |formula_name|
+      Formula[formula_name]
+    rescue FormulaUnavailableError
+      nil
+    end.sort_by(&:version).reverse
+  end
+
+  sig { returns(T.nilable(String)) }
+  def link_overwrite_reason
+    installed_overwrite_formulae = link_overwrite_formulae.select(&:any_version_installed?)
+    return if installed_overwrite_formulae.empty?
+
+    reason_formulae = installed_overwrite_formulae.select(&:linked?)
+    status = if reason_formulae.empty?
+      reason_formulae = installed_overwrite_formulae
+      "installed"
+    else
+      "linked"
+    end
+
+    "#{reason_formulae.map(&:full_name).to_sentence} #{reason_formulae.one? ? "is" : "are"} already #{status}"
+  end
+
+  sig { returns(T::Array[String]) }
+  def link_overwrite_related_formula_names
+    [*versioned_formulae_names, *full_formulae_names, unversioned_formula_name].compact
+  end
+
+  # Returns sibling Formula names whose prefix links should be replaced when this Formula is linked.
+  sig { returns(T::Array[String]) }
+  def link_overwrite_formulae_names
+    formula_names = T.let(Set.new, T::Set[String])
+    pending_formula_names = T.let([name], T::Array[String])
+
+    pending_formula_names.each do |current_name|
+      current_formula = begin
+        if current_name == name
+          self
+        else
+          Formula[current_name]
+        end
+      rescue FormulaUnavailableError
+        next
+      end
+
+      current_formula.link_overwrite_related_formula_names.each do |related_formula_name|
+        next if related_formula_name == name
+        next unless formula_names.add?(related_formula_name)
+
+        pending_formula_names << related_formula_name
+      end
+    end
+
+    formula_names.to_a.sort
+  end
+
+  # Returns sibling Formulae whose prefix links should be replaced when this Formula is linked.
+  sig { returns(T::Array[Formula]) }
+  def link_overwrite_formulae
+    link_overwrite_formulae_names.filter_map do |formula_name|
+      Formula[formula_name]
+    rescue FormulaUnavailableError
+      nil
+    end
+  end
+
+  sig { params(path: Pathname).returns(T.nilable(T.any(String, Symbol))) }
+  def link_overwrite_keg_name(path)
+    # Don't overwrite files not created by Homebrew.
+    return if path.stat.uid != HOMEBREW_ORIGINAL_BREW_FILE.stat.uid
+
+    keg = Keg.for(path)
+    # This keg doesn't belong to any current core/tap formula, most likely coming from a DIY install.
+    return if keg.tab.tap.nil?
+
+    keg.name
+  rescue NotAKegError, Errno::ENOENT
+    # File doesn't belong to any keg.
+    :missing
+  end
+
+  sig {
+    params(keg_name: T.nilable(T.any(String, Symbol)), overwrite_formulae: T::Array[Formula]).returns(T::Boolean)
+  }
+  def implied_link_overwrite?(keg_name, overwrite_formulae)
+    return false if overwrite_formulae.empty?
+    return false if keg_name.nil?
+
+    case keg_name
+    when :missing
+      # File doesn't belong to any keg, so implied overwrites do not apply.
+      false
+    else
+      overwrite_formulae.any? do |formula|
+        formula.possible_names.include?(keg_name)
+      end
+    end
+  end
   # Whether this {Formula} is version-synced with other formulae.
   sig { returns(T::Boolean) }
   def synced_with_other_formulae?
@@ -1526,39 +1647,37 @@ class Formula
   end
 
   # @see .link_overwrite
+  # Explicit `link_overwrite` paths may also be implied for related formula families.
   sig { params(path: Pathname).returns(T::Boolean) }
   def link_overwrite?(path)
-    # Don't overwrite files not created by Homebrew.
-    return false if path.stat.uid != HOMEBREW_ORIGINAL_BREW_FILE.stat.uid
-
-    # Don't overwrite files belong to other keg except when that
+    # Don't overwrite files that belong to another keg except when that
     # keg's formula is deleted.
-    begin
-      keg = Keg.for(path)
-    rescue NotAKegError, Errno::ENOENT
-      # file doesn't belong to any keg.
-    else
-      tab_tap = keg.tab.tap
-      # this keg doesn't below to any core/tap formula, most likely coming from a DIY install.
-      return false if tab_tap.nil?
-
+    case keg_name = link_overwrite_keg_name(path)
+    when String
       begin
-        f = Formulary.factory(keg.name)
+        f = Formulary.factory(keg_name)
       rescue FormulaUnavailableError
         # formula for this keg is deleted, so defer to allowlist
       rescue TapFormulaAmbiguityError
         return false # this keg belongs to another formula
       else
-        # this keg belongs to another unrelated formula
-        return false unless f.possible_names.include?(keg.name)
+        # Ensure `keg_name` maps cleanly to the resolved formula via `possible_names`.
+        return false unless f.possible_names.include?(keg_name)
       end
+    when :missing
+      # File doesn't belong to any keg, so defer to overwrite checks below.
+    else
+      return false
     end
+
     to_check = path.relative_path_from(HOMEBREW_PREFIX).to_s
-    T.must(self.class.link_overwrite_paths).any? do |p|
+    return true if T.must(self.class.link_overwrite_paths).any? do |p|
       p.to_s == to_check ||
-        to_check.start_with?("#{p.to_s.chomp("/")}/") ||
-        /^#{Regexp.escape(p.to_s).gsub('\*', ".*?")}$/.match?(to_check)
+      to_check.start_with?("#{p.to_s.chomp("/")}/") ||
+      /^#{Regexp.escape(p.to_s).gsub('\*', ".*?")}$/.match?(to_check)
     end
+
+    implied_link_overwrite?(keg_name, link_overwrite_formulae)
   end
 
   # Whether this {Formula} is deprecated (i.e. warns on installation).
@@ -1647,7 +1766,7 @@ class Formula
 
   sig { returns(T::Boolean) }
   def skip_cxxstdlib_check?
-    odeprecated "`Formula#skip_cxxstdlib_check?`"
+    odisabled "`Formula#skip_cxxstdlib_check?`"
     false
   end
 
@@ -1758,11 +1877,7 @@ class Formula
     Formula.cache[:outdated_kegs][cache_key] ||= begin
       all_kegs = []
       current_version = T.let(false, T::Boolean)
-      latest = if core_formula? && Homebrew::EnvConfig.use_internal_api? && Homebrew::API.formula_names.include?(full_name)
-        Homebrew::API::Internal.formula_stub(full_name)
-      else
-        latest_formula
-      end
+      latest = latest_formula
 
       installed_kegs.each do |keg|
         all_kegs << keg
@@ -1795,7 +1910,7 @@ class Formula
 
   sig { returns(T::Boolean) }
   def new_formula_available?
-    installed_alias_target_changed? && !latest_formula(prefer_stub: true).latest_version_installed?
+    installed_alias_target_changed? && !latest_formula.latest_version_installed?
   end
 
   sig { returns(T.nilable(Formula)) }
@@ -1826,17 +1941,9 @@ class Formula
 
   # If the alias has changed value, return the new formula.
   # Otherwise, return the latest version of the current formula.
-  # Optionally, return only a formula stub to avoid fetching a new formula file.
-  sig { params(prefer_stub: T::Boolean).returns(Formula) }
-  def latest_formula(prefer_stub: false)
-    return T.must(current_installed_alias_target) if installed_alias_target_changed?
-    return self if !core_formula? || !Homebrew::EnvConfig.use_internal_api?
-
-    if prefer_stub
-      Formulary.factory_stub(full_name, active_spec_sym, force_bottle:, flags: self.class.build_flags)
-    else
-      Formulary.factory(full_name, active_spec_sym, force_bottle:, flags: self.class.build_flags)
-    end
+  sig { returns(Formula) }
+  def latest_formula
+    installed_alias_target_changed? ? T.must(current_installed_alias_target) : self
   end
 
   sig { returns(T::Array[Formula]) }
@@ -1915,10 +2022,16 @@ class Formula
   #
   # @api public
   sig {
-    params(root: T.any(String, Pathname), path: T.any(String, Pathname)).returns(T::Array[String])
+    params(
+      root:     T.any(String, Pathname),
+      path:     T.any(String, Pathname),
+      features: T.nilable(T.any(String, T::Array[String])),
+    ).returns(T::Array[String])
   }
-  def std_cargo_args(root: prefix, path: ".")
-    ["--jobs", ENV.make_jobs.to_s, "--locked", "--root=#{root}", "--path=#{path}"]
+  def std_cargo_args(root: prefix, path: ".", features: nil)
+    args = ["--jobs", ENV.make_jobs.to_s, "--locked", "--root=#{root}", "--path=#{path}"]
+    args += ["--features=#{Array(features).join(",")}"] if features
+    args
   end
 
   # Standard parameters for CMake builds.
@@ -2876,6 +2989,8 @@ class Formula
 
     bottle_spec.collector.each_tag do |tag|
       tag_spec = bottle_spec.collector.specification_for(tag, no_older_versions: true)
+      odie "Specification for tag #{tag} is nil" if tag_spec.nil?
+
       os_cellar = tag_spec.cellar
       os_cellar = os_cellar.inspect if os_cellar.is_a?(Symbol)
       checksum = tag_spec.checksum.hexdigest
@@ -3573,7 +3688,6 @@ class Formula
         @skip_clean_paths = T.let(Set.new, T.nilable(T::Set[T.any(String, Symbol)]))
         @link_overwrite_paths = T.let(Set.new, T.nilable(T::Set[String]))
         @loaded_from_api = T.let(false, T.nilable(T::Boolean))
-        @loaded_from_stub = T.let(false, T.nilable(T::Boolean))
         @api_source = T.let(nil, T.nilable(T::Hash[String, T.untyped]))
         @on_system_blocks_exist = T.let(false, T.nilable(T::Boolean))
         @network_access_allowed = T.let(SUPPORTED_NETWORK_ACCESS_PHASES.to_h do |phase|
@@ -3601,10 +3715,6 @@ class Formula
     # Whether this formula was loaded using the formulae.brew.sh API.
     sig { returns(T::Boolean) }
     def loaded_from_api? = !!@loaded_from_api
-
-    # Whether this formula was loaded using the internal formulae.brew.sh API.
-    sig { returns(T::Boolean) }
-    def loaded_from_stub? = !!@loaded_from_stub
 
     # Whether this formula was loaded using the formulae.brew.sh API.
     sig { returns(T.nilable(T::Hash[String, T.untyped])) }
@@ -4238,7 +4348,7 @@ class Formula
     def option(name, description = "")
       case name
       when Symbol
-        odeprecated "`option :#{name}`"
+        odisabled "`option :#{name}`"
       else
         specs.each { |spec| spec.option(name, description) }
       end
@@ -4420,7 +4530,7 @@ class Formula
     # @api public
     sig { params(check_type: Symbol).void }
     def cxxstdlib_check(check_type)
-      odeprecated "`cxxstdlib_check :skip`"
+      odisabled "`cxxstdlib_check :skip`"
       define_method(:skip_cxxstdlib_check?) { true } if check_type == :skip
     end
 
@@ -4473,7 +4583,7 @@ class Formula
     # @api public
     sig { params(_standards: Symbol).void }
     def needs(*_standards)
-      odeprecated "`needs :openmp`", '`depends_on "gcc"`'
+      odisabled "`needs :openmp`", '`depends_on "gcc"`'
     end
 
     # A test is required for new formulae and makes us happy.
@@ -4553,6 +4663,8 @@ class Formula
       if because.is_a?(Symbol) && !NO_AUTOBUMP_REASONS_LIST.key?(because)
         raise ArgumentError, "'because' argument should use valid symbol or a string!"
       end
+
+      odeprecated "no_autobump! because: :requires_manual_review" if because == :requires_manual_review
 
       @no_autobump_defined = T.let(true, T.nilable(T::Boolean))
       @no_autobump_message = T.let(because, T.nilable(T.any(String, Symbol)))
@@ -4718,12 +4830,17 @@ class Formula
       )
 
       @deprecation_date = T.let(Date.parse(date), T.nilable(Date))
-      return if T.must(@deprecation_date) > Date.today
-
-      @deprecation_reason = T.let(because, T.nilable(T.any(String, Symbol)))
-      @deprecation_replacement_formula = T.let(replacement_formula.presence || replacement, T.nilable(String))
-      @deprecation_replacement_cask = T.let(replacement_cask.presence || replacement, T.nilable(String))
-      @deprecated = T.let(true, T.nilable(T::Boolean))
+      @deprecated = T.let(T.must(@deprecation_date) <= Date.today, T.nilable(T::Boolean))
+      if @deprecated
+        @deprecation_reason = T.let(because, T.nilable(T.any(String, Symbol)))
+        @deprecation_replacement_formula = T.let(replacement_formula.presence || replacement, T.nilable(String))
+        @deprecation_replacement_cask = T.let(replacement_cask.presence || replacement, T.nilable(String))
+      else
+        # Reset these to handle disable! before deprecate!
+        @deprecation_reason = nil
+        @deprecation_replacement_formula = nil
+        @deprecation_replacement_cask = nil
+      end
     end
 
     # Whether this {Formula} is deprecated (i.e. warns on installation).
@@ -4771,9 +4888,9 @@ class Formula
     sig { returns(T.nilable(T::Hash[Symbol, T.nilable(T.any(String, Symbol))])) }
     attr_reader :deprecate_args
 
-    # Disables a {Formula} (on the given date) so it cannot be
-    # installed. If the date has not yet passed the formula
-    # will be deprecated instead of disabled.
+    # Disables a {Formula} (on the given date) so it cannot be installed.
+    # If the date has not yet passed and there is no deprecate! date,
+    # then the formula will be deprecated.
     #
     # ### Examples
     #
@@ -4825,6 +4942,8 @@ class Formula
       @disable_date = T.let(Date.parse(date), T.nilable(Date))
 
       if T.must(@disable_date) > Date.today
+        return if @deprecation_date.present?
+
         @deprecation_reason = T.let(because, T.nilable(T.any(String, Symbol)))
         @deprecation_replacement_formula = T.let(replacement_formula.presence || replacement, T.nilable(String))
         @deprecation_replacement_cask = T.let(replacement_cask.presence || replacement, T.nilable(String))

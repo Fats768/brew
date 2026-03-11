@@ -122,6 +122,8 @@ module Cask
       @dsl.instance_eval(&@block)
       @dsl.add_implicit_macos_dependency
       @dsl.language_eval
+    rescue NoMethodError => e
+      raise CaskInvalidError.new(token, e.message), e.backtrace
     end
 
     def_delegators :@dsl, *::Cask::DSL::DSL_METHODS
@@ -168,11 +170,41 @@ module Cask
     def supports_linux?
       return true if font?
 
-      return false if artifacts.any? do |artifact|
-        ::Cask::Artifact::MACOS_ONLY_ARTIFACTS.include?(artifact.class)
+      # Cache the os value before contains_os_specific_artifacts? refreshes the cask
+      # (the refresh clears @dsl.os in generic/non-OS-specific contexts)
+      os_value = @dsl.os
+
+      return false if contains_os_specific_artifacts?
+
+      os_value.present?
+    end
+
+    sig { returns(T::Boolean) }
+    def contains_os_specific_artifacts?
+      return false unless @dsl.on_system_blocks_exist?
+
+      any_loaded = T.let(false, T::Boolean)
+      @contains_os_specific_artifacts ||= begin
+        OnSystem::VALID_OS_ARCH_TAGS.each do |bottle_tag|
+            Homebrew::SimulateSystem.with_tag(bottle_tag) do
+              refresh
+
+              any_loaded = true if artifacts.any? do |artifact|
+                (bottle_tag.linux? && ::Cask::Artifact::MACOS_ONLY_ARTIFACTS.include?(artifact.class)) ||
+                (bottle_tag.macos? && ::Cask::Artifact::LINUX_ONLY_ARTIFACTS.include?(artifact.class))
+              end
+            end
+        rescue CaskInvalidError
+            # Invalid for this OS/arch tag; treat as having no OS-specific artifacts.
+            next
+        ensure
+            refresh
+        end
+
+        any_loaded
       end
 
-      @dsl.os.present?
+      @contains_os_specific_artifacts
     end
 
     # The caskfile is needed during installation when there are
@@ -351,12 +383,12 @@ module Cask
       nil
     end
 
-    sig { params(cask_struct: Homebrew::API::CaskStruct).void }
-    def populate_from_api!(cask_struct)
+    sig { params(cask_struct: Homebrew::API::CaskStruct, tap_git_head: T.nilable(String)).void }
+    def populate_from_api!(cask_struct, tap_git_head:)
       raise ArgumentError, "Expected cask to be loaded from the API" unless loaded_from_api?
 
       @languages = cask_struct.languages
-      @tap_git_head = cask_struct.tap_git_head
+      @tap_git_head = tap_git_head
       @ruby_source_path = cask_struct.ruby_source_path
       @ruby_source_checksum = cask_struct.ruby_source_checksum
     end

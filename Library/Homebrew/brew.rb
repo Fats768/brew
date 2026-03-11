@@ -90,7 +90,7 @@ begin
     cmd_class = Homebrew::AbstractCommand.command(cmd)
     Homebrew.running_command = cmd
     if cmd_class
-      if !Homebrew::EnvConfig.no_install_from_api? && Homebrew::EnvConfig.download_concurrency > 1
+      unless Homebrew::EnvConfig.no_install_from_api?
         require "api"
         Homebrew::API.fetch_api_files!
       end
@@ -101,6 +101,9 @@ begin
       Utils::Analytics.report_command_run(command_instance)
       command_instance.run
     else
+      Utils::Output.odeprecated "Calling `brew #{cmd}` without subclassing `AbstractCommand`",
+                                "subclassing of `Homebrew::AbstractCommand` " \
+                                "(see https://docs.brew.sh/External-Commands)"
       begin
         Homebrew.public_send Commands.method_name(cmd)
       rescue NoMethodError => e

@@ -15,7 +15,7 @@ module GitHub
   extend SystemCommand::Mixin
   extend Utils::Output::Mixin
 
-  MAX_PER_PAGE = T.let(100, Integer)
+  MAX_PER_PAGE = 100
 
   def self.issues(repo:, **filters)
     uri = url_to("repos", repo, "issues")
@@ -337,7 +337,7 @@ module GitHub
       artifacts
       .group_by { |art| art["name"] }
       .select { |name| File.fnmatch?(artifact_pattern, name, File::FNM_EXTGLOB) }
-      .map { |_, arts| arts.last }
+      .map { |_, arts| arts.max_by { |art| art["created_at"] } }
 
     if matching_artifacts.empty?
       raise API::Error, <<~EOS
@@ -629,7 +629,7 @@ module GitHub
 
     confidence = version ? "are" : "might be"
     duplicates_message = <<~EOS
-      These #{state} pull requests #{confidence} duplicates:
+      These #{"#{state} " if state}pull requests #{confidence} duplicates:
       #{pull_requests.map { |pr| "#{pr["title"]} #{pr["html_url"]}" }.join("\n")}
     EOS
     error_message = <<~EOS

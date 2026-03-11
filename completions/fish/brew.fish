@@ -504,7 +504,7 @@ __fish_brew_complete_arg 'bump-unversioned-casks' -a '(__fish_brew_suggest_casks
 __fish_brew_complete_arg 'bump-unversioned-casks' -a '(__fish_brew_suggest_taps_installed)'
 
 
-__fish_brew_complete_cmd 'bundle' 'Bundler for non-Ruby dependencies from Homebrew, Homebrew Cask, Mac App Store, Visual Studio Code (and forks/variants), Go packages, Cargo packages and Flatpak'
+__fish_brew_complete_cmd 'bundle' 'Bundler for non-Ruby dependencies from Homebrew, Homebrew Cask, Mac App Store, Visual Studio Code (and forks/variants), Go packages, Cargo packages, uv tools and Flatpak'
 __fish_brew_complete_sub_cmd 'bundle' 'install'
 __fish_brew_complete_sub_cmd 'bundle' 'dump'
 __fish_brew_complete_sub_cmd 'bundle' 'cleanup'
@@ -536,12 +536,14 @@ __fish_brew_complete_arg 'bundle' -l no-go -d '`dump` without Go packages. Enabl
 __fish_brew_complete_arg 'bundle' -l no-restart -d '`dump` does not add `restart_service` to formula lines'
 __fish_brew_complete_arg 'bundle' -l no-secrets -d 'Attempt to remove secrets from the environment before `exec`, `sh`, or `env`. Enabled by default if `$HOMEBREW_BUNDLE_NO_SECRETS` is set'
 __fish_brew_complete_arg 'bundle' -l no-upgrade -d '`install` does not run `brew upgrade` on outdated dependencies. `check` does not check for outdated dependencies. Note they may still be upgraded by `brew install` if needed. Enabled by default if `$HOMEBREW_BUNDLE_NO_UPGRADE` is set'
+__fish_brew_complete_arg 'bundle' -l no-uv -d '`dump` without uv tools. Enabled by default if `$HOMEBREW_BUNDLE_DUMP_NO_UV` is set'
 __fish_brew_complete_arg 'bundle' -l no-vscode -d '`dump` without VSCode (and forks/variants) extensions. Enabled by default if `$HOMEBREW_BUNDLE_DUMP_NO_VSCODE` is set'
 __fish_brew_complete_arg 'bundle' -l quiet -d 'Make some output more quiet'
 __fish_brew_complete_arg 'bundle' -l services -d 'Temporarily start services while running the `exec` or `sh` command. Enabled by default if `$HOMEBREW_BUNDLE_SERVICES` is set'
 __fish_brew_complete_arg 'bundle' -l tap -d '`list`, `dump` or `cleanup` Homebrew tap dependencies'
 __fish_brew_complete_arg 'bundle' -l upgrade -d '`install` runs `brew upgrade` on outdated dependencies, even if `$HOMEBREW_BUNDLE_NO_UPGRADE` is set'
 __fish_brew_complete_arg 'bundle' -l upgrade-formulae -d '`install` runs `brew upgrade` on any of these comma-separated formulae, even if `$HOMEBREW_BUNDLE_NO_UPGRADE` is set'
+__fish_brew_complete_arg 'bundle' -l uv -d '`list` or `dump` uv tools'
 __fish_brew_complete_arg 'bundle' -l verbose -d '`install` prints output from commands as they are run. `check` lists all missing dependencies'
 __fish_brew_complete_arg 'bundle' -l vscode -d '`list`, `dump` or `cleanup` VSCode (and forks/variants) extensions'
 __fish_brew_complete_arg 'bundle' -l zap -d '`cleanup` casks using the `zap` command instead of `uninstall`'
@@ -918,6 +920,14 @@ __fish_brew_complete_arg 'generate-man-completions' -l help -d 'Show this messag
 __fish_brew_complete_arg 'generate-man-completions' -l no-exit-code -d 'Exit with code 0 even if no changes were made'
 __fish_brew_complete_arg 'generate-man-completions' -l quiet -d 'Make some output more quiet'
 __fish_brew_complete_arg 'generate-man-completions' -l verbose -d 'Make some output more verbose'
+
+
+__fish_brew_complete_cmd 'generate-zap' 'Generate a `zap` stanza for a cask by scanning the system for associated files and directories'
+__fish_brew_complete_arg 'generate-zap' -l debug -d 'Display any debugging information'
+__fish_brew_complete_arg 'generate-zap' -l help -d 'Show this message'
+__fish_brew_complete_arg 'generate-zap' -l name -d 'Treat the argument as a raw application name instead of a cask token'
+__fish_brew_complete_arg 'generate-zap' -l quiet -d 'Make some output more quiet'
+__fish_brew_complete_arg 'generate-zap' -l verbose -d 'Make some output more verbose'
 
 
 __fish_brew_complete_cmd 'gist-logs' 'Upload logs for a failed build of formula to a new Gist'
@@ -1645,6 +1655,7 @@ __fish_brew_complete_arg 'style' -l help -d 'Show this message'
 __fish_brew_complete_arg 'style' -l only-cops -d 'Specify a comma-separated cops list to check for violations of only the listed RuboCop cops'
 __fish_brew_complete_arg 'style' -l quiet -d 'Make some output more quiet'
 __fish_brew_complete_arg 'style' -l reset-cache -d 'Reset the RuboCop cache'
+__fish_brew_complete_arg 'style' -l todo -d 'Add `rubocop:todo` comments for RuboCop violations that remain after auto-correction. Requires `--fix`'
 __fish_brew_complete_arg 'style' -l verbose -d 'Make some output more verbose'
 __fish_brew_complete_arg 'style' -a '(__fish_brew_suggest_taps_installed)'
 __fish_brew_complete_arg 'style; and not __fish_seen_argument -l cask -l casks' -a '(__fish_brew_suggest_formulae_all)'

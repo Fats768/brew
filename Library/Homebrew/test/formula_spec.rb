@@ -69,7 +69,7 @@ RSpec.describe Formula do
 
     context "when in a Tap" do
       let(:tap) { Tap.fetch("foo", "bar") }
-      let(:path) { (tap.path/"Formula/#{name}.rb") }
+      let(:path) { tap.path/"Formula/#{name}.rb" }
       let(:full_name) { "#{tap.user}/#{tap.repository}/#{name}" }
       let(:full_alias_name) { "#{tap.user}/#{tap.repository}/#{alias_name}" }
 
@@ -158,12 +158,26 @@ RSpec.describe Formula do
       end
     end
 
+    let(:f_full) do
+      formula "foo-full" do
+        url "foo-full-1.0"
+      end
+    end
+
+    let(:f_full2) do
+      formula "foo@2.0-full" do
+        url "foo-full-2.0"
+      end
+    end
+
     before do
       # don't try to load/fetch gcc/glibc
       allow(DevelopmentTools).to receive_messages(needs_libc_formula?: false, needs_compiler_formula?: false)
 
       allow(Formulary).to receive(:load_formula_from_path).with(f2.name, f2.path).and_return(f2)
       allow(Formulary).to receive(:factory).with(f2.name).and_return(f2)
+      allow(Formulary).to receive(:load_formula_from_path).with(f_full2.name, f_full2.path).and_return(f_full2)
+      allow(Formulary).to receive(:factory).with(f_full2.name).and_return(f_full2)
       allow(f).to receive(:versioned_formulae_names).and_return([f2.name])
     end
 
@@ -177,6 +191,315 @@ RSpec.describe Formula do
       FileUtils.touch f.path
       FileUtils.touch f2.path
       expect(f2.versioned_formulae).to be_empty
+    end
+
+    it "returns versioned full formulae for the matching full formula" do
+      allow(f_full).to receive(:tap).and_return(nil)
+      FileUtils.touch f_full.path
+      FileUtils.touch f_full2.path
+      expect(f_full.versioned_formulae).to eq [f_full2]
+    end
+  end
+
+  describe "#full_formulae_names" do
+    let(:f) do
+      formula "foo" do
+        url "foo-1.0"
+      end
+    end
+
+    let(:f_full) do
+      formula "foo-full" do
+        url "foo-full-1.0"
+      end
+    end
+
+    let(:f_versioned) do
+      formula "foo@2.0" do
+        url "foo-2.0"
+      end
+    end
+
+    let(:f_versioned_full) do
+      formula "foo@2.0-full" do
+        url "foo-full-2.0"
+      end
+    end
+
+    before do
+      [f, f_full, f_versioned].each do |formula|
+        allow(formula).to receive(:tap).and_return(nil)
+        FileUtils.touch formula.path
+      end
+    end
+
+    it "returns only existing sibling full and non-full names" do
+      expect(f.full_formulae_names).to eq ["foo-full"]
+      expect(f_full.full_formulae_names).to eq ["foo"]
+      expect(f_versioned.full_formulae_names).to eq []
+
+      allow(f_versioned_full).to receive(:tap).and_return(nil)
+      FileUtils.touch f_versioned_full.path
+      f_versioned_with_full = formula "foo@2.0" do
+        url "foo-2.0"
+      end
+      allow(f_versioned_with_full).to receive(:tap).and_return(nil)
+      FileUtils.touch f_versioned_with_full.path
+
+      expect(f_versioned_with_full.full_formulae_names).to eq ["foo@2.0-full"]
+    end
+  end
+
+  describe "#full_formulae" do
+    let(:f) do
+      formula "foo" do
+        url "foo-1.0"
+      end
+    end
+
+    let(:f_full) do
+      formula "foo-full" do
+        url "foo-full-1.0"
+      end
+    end
+
+    before do
+      allow(Formulary).to receive(:load_formula_from_path).with(f_full.name, f_full.path).and_return(f_full)
+      allow(Formulary).to receive(:factory).with(f_full.name).and_return(f_full)
+      allow(f).to receive(:full_formulae_names).and_return([f_full.name])
+    end
+
+    it "returns array with sibling full formulae" do
+      FileUtils.touch f.path
+      FileUtils.touch f_full.path
+      expect(f.full_formulae).to eq [f_full]
+    end
+  end
+
+  describe "#unversioned_formula_name" do
+    let(:f) do
+      formula "foo" do
+        url "foo-1.0"
+      end
+    end
+
+    let(:f_full) do
+      formula "foo@2.0-full" do
+        url "foo-full-2.0"
+      end
+    end
+
+    let(:f_versioned) do
+      formula "foo@2.0" do
+        url "foo-2.0"
+      end
+    end
+
+    it "returns the matching unversioned sibling name" do
+      expect(f.unversioned_formula_name).to be_nil
+      expect(f_versioned.unversioned_formula_name).to eq("foo")
+      expect(f_full.unversioned_formula_name).to eq("foo-full")
+    end
+  end
+
+  describe "#link_overwrite_reason" do
+    it "explains why a formula was not linked" do
+      f = formula "foo@2.0" do
+        url "foo-2.0"
+      end
+      other_formula = formula "foo" do
+        url "foo-1.0"
+      end
+      allow(other_formula).to receive_messages(any_version_installed?: true, linked?: true)
+      allow(f).to receive(:link_overwrite_formulae).and_return([other_formula])
+
+      expect(f.link_overwrite_reason).to eq("foo is already linked")
+    end
+  end
+
+  describe "#link_overwrite_formulae_names" do
+    let(:f) do
+      formula "foo" do
+        url "foo-1.0"
+      end
+    end
+
+    let(:f_full) do
+      formula "foo-full" do
+        url "foo-full-1.0"
+      end
+    end
+
+    let(:f_versioned) do
+      formula "foo@2.0" do
+        url "foo-2.0"
+      end
+    end
+
+    let(:f_versioned_full) do
+      formula "foo@2.0-full" do
+        url "foo-full-2.0"
+      end
+    end
+
+    before do
+      [f, f_full, f_versioned, f_versioned_full].each do |formula|
+        allow(Formulary).to receive(:load_formula_from_path).with(formula.name, formula.path).and_return(formula)
+        allow(Formulary).to receive(:factory).with(formula.name).and_return(formula)
+        FileUtils.touch formula.path
+      end
+
+      allow(f).to receive_messages(versioned_formulae_names: [f_versioned.name], full_formulae_names: [f_full.name])
+      allow(f_full).to receive_messages(versioned_formulae_names: [], full_formulae_names: [f.name])
+      allow(f_versioned).to receive_messages(versioned_formulae_names: [],
+                                             full_formulae_names:      [f_versioned_full.name])
+      allow(f_versioned_full).to receive_messages(versioned_formulae_names: [],
+                                                  full_formulae_names:      [f_versioned.name])
+    end
+
+    it "includes direct full and unversioned siblings while excluding the current formula" do
+      expect(f_versioned.link_overwrite_formulae_names)
+        .to eq(["foo", f_full.name, f_versioned_full.name])
+    end
+  end
+
+  describe "#link_overwrite?" do
+    let(:versioned_formula) do
+      formula "foo@22" do
+        url "foo-22.0"
+      end
+    end
+
+    let(:related_formula) do
+      formula "foo" do
+        url "foo-1.0"
+      end
+    end
+
+    let(:conflict_file) { HOMEBREW_PREFIX/"lib/formula_spec/node_modules/npm/LICENSE" }
+
+    before do
+      allow(versioned_formula).to receive(:link_overwrite_formulae).and_return([related_formula])
+      conflict_file.dirname.mkpath
+      FileUtils.touch conflict_file
+    end
+
+    after do
+      FileUtils.rm_f conflict_file
+      conflict_file.dirname.rmdir_if_possible
+      conflict_file.dirname.parent.rmdir_if_possible
+      conflict_file.dirname.parent.parent.rmdir_if_possible
+    end
+
+    it "does not allow untracked conflicts for related formula families" do
+      expect(versioned_formula.link_overwrite?(conflict_file)).to be false
+    end
+
+    it "returns false when the conflict is not Homebrew-managed" do
+      allow(versioned_formula).to receive(:link_overwrite_keg_name).and_return(nil)
+
+      expect(versioned_formula.link_overwrite?(HOMEBREW_PREFIX/"bin/foo")).to be false
+    end
+
+    it "returns false for ambiguous keg names" do
+      allow(versioned_formula).to receive(:link_overwrite_keg_name).and_return("foo")
+      ambiguity_loaders = [
+        instance_double(Formulary::FormulaLoader, tap: instance_double(Tap, to_s: "homebrew/core")),
+        instance_double(Formulary::FormulaLoader, tap: instance_double(Tap, to_s: "homebrew/other")),
+      ]
+      allow(Formulary).to receive(:factory).with("foo")
+                                           .and_raise(TapFormulaAmbiguityError.new("foo", ambiguity_loaders))
+
+      expect(versioned_formula.link_overwrite?(HOMEBREW_PREFIX/"bin/foo")).to be false
+    end
+
+    it "returns false for unrelated keg names" do
+      unrelated_formula = formula "bar" do
+        url "bar-1.0"
+      end
+      allow(versioned_formula).to receive(:link_overwrite_keg_name).and_return("bar")
+      allow(Formulary).to receive(:factory).with("bar").and_return(unrelated_formula)
+      allow(unrelated_formula).to receive(:possible_names).and_return(["baz"])
+
+      expect(versioned_formula.link_overwrite?(HOMEBREW_PREFIX/"bin/bar")).to be false
+    end
+
+    it "allows explicit link_overwrite paths" do
+      formula_with_explicit_overwrite = formula "baz" do
+        url "baz-1.0"
+        link_overwrite "bin/baz"
+      end
+      allow(formula_with_explicit_overwrite).to receive(:link_overwrite_keg_name).and_return("baz")
+      allow(Formulary).to receive(:factory).with("baz").and_return(formula_with_explicit_overwrite)
+
+      expect(formula_with_explicit_overwrite.link_overwrite?(HOMEBREW_PREFIX/"bin/baz")).to be true
+    end
+
+    it "allows existing related keg names through implied overwrites" do
+      allow(versioned_formula).to receive(:link_overwrite_keg_name).and_return("foo")
+      allow(Formulary).to receive(:factory).with("foo").and_return(related_formula)
+
+      expect(versioned_formula.link_overwrite?(HOMEBREW_PREFIX/"bin/foo")).to be true
+    end
+
+    it "allows deleted related keg names through implied overwrites" do
+      allow(versioned_formula).to receive(:link_overwrite_keg_name).and_return("foo-old")
+      allow(Formulary).to receive(:factory).with("foo-old").and_raise(FormulaUnavailableError.new("foo-old"))
+      allow(related_formula).to receive_messages(oldnames: ["foo-old"], aliases: [])
+
+      expect(versioned_formula.link_overwrite?(HOMEBREW_PREFIX/"bin/foo")).to be true
+    end
+
+    it "returns false for missing conflicts without explicit or implied overwrites" do
+      formula_without_overwrites = formula "qux" do
+        url "qux-1.0"
+      end
+      allow(formula_without_overwrites).to receive_messages(link_overwrite_keg_name: :missing,
+                                                            link_overwrite_formulae: [])
+
+      expect(formula_without_overwrites.link_overwrite?(HOMEBREW_PREFIX/"bin/qux")).to be false
+    end
+  end
+
+  describe "#implied_link_overwrite?" do
+    let(:versioned_formula) do
+      formula "foo@22" do
+        url "foo-22.0"
+      end
+    end
+
+    let(:related_formula) do
+      formula "foo" do
+        url "foo-1.0"
+      end
+    end
+
+    before do
+      allow(related_formula).to receive_messages(oldnames: ["foo-old"], aliases: ["foo-alias"])
+    end
+
+    it "does not allow missing conflicts without actual related formulae" do
+      expect(versioned_formula.implied_link_overwrite?(:missing, [])).to be false
+    end
+
+    it "does not allow non-Homebrew conflicts" do
+      expect(versioned_formula.implied_link_overwrite?(nil, [related_formula])).to be false
+    end
+
+    it "does not allow missing conflicts even when related formulae exist" do
+      expect(versioned_formula.implied_link_overwrite?(:missing, [related_formula])).to be false
+    end
+
+    it "allows related keg names via oldnames" do
+      expect(versioned_formula.implied_link_overwrite?("foo-old", [related_formula])).to be true
+    end
+
+    it "allows related keg names via aliases" do
+      expect(versioned_formula.implied_link_overwrite?("foo-alias", [related_formula])).to be true
+    end
+
+    it "does not allow unrelated keg names" do
+      expect(versioned_formula.implied_link_overwrite?("bar", [related_formula])).to be false
     end
   end
 
@@ -1185,7 +1508,7 @@ RSpec.describe Formula do
 
         pour_bottle? do
           reason "false reason"
-          satisfy { (var == etc) }
+          satisfy { var == etc }
         end
       end
 
@@ -1349,11 +1672,11 @@ RSpec.describe Formula do
   end
 
   describe "#outdated_kegs" do
-    let(:outdated_prefix) { (HOMEBREW_CELLAR/"#{f.name}/1.11") }
-    let(:same_prefix) { (HOMEBREW_CELLAR/"#{f.name}/1.20") }
-    let(:greater_prefix) { (HOMEBREW_CELLAR/"#{f.name}/1.21") }
-    let(:head_prefix) { (HOMEBREW_CELLAR/"#{f.name}/HEAD") }
-    let(:old_alias_target_prefix) { (HOMEBREW_CELLAR/"#{old_formula.name}/1.0") }
+    let(:outdated_prefix) { HOMEBREW_CELLAR/"#{f.name}/1.11" }
+    let(:same_prefix) { HOMEBREW_CELLAR/"#{f.name}/1.20" }
+    let(:greater_prefix) { HOMEBREW_CELLAR/"#{f.name}/1.21" }
+    let(:head_prefix) { HOMEBREW_CELLAR/"#{f.name}/HEAD" }
+    let(:old_alias_target_prefix) { HOMEBREW_CELLAR/"#{old_formula.name}/1.0" }
 
     let(:f) do
       formula do
@@ -2051,6 +2374,107 @@ RSpec.describe Formula do
       end
 
       expect(f.class.preserve_rpath?).to be(false)
+    end
+  end
+
+  describe "#deprecate! and #disable!" do
+    let(:deprecation_date) { "2020-01-01" }
+    let(:disable_date) { "2021-01-01" }
+
+    context "with both dates provided in correct order" do
+      let(:f) do
+        deprecation_date_ = deprecation_date
+        disable_date_ = disable_date
+        formula "foo" do
+          url "foo-1.0"
+          deprecate! date: deprecation_date_.to_s, because: :unmaintained
+          disable! date: disable_date_.to_s, because: :unsupported
+        end
+      end
+
+      it "is not deprecated before deprecation date" do
+        allow(Date).to receive(:today).and_return(Date.parse(deprecation_date) - 1)
+        expect(f.deprecated?).to be(false)
+        expect(f.deprecation_reason).to be_nil
+        expect(f.disabled?).to be(false)
+        expect(f.disable_reason).to be_nil
+      end
+
+      it "is deprecated on deprecation date" do
+        allow(Date).to receive(:today).and_return(Date.parse(deprecation_date))
+        expect(f.deprecated?).to be(true)
+        expect(f.deprecation_reason).to be(:unmaintained)
+        expect(f.disabled?).to be(false)
+        expect(f.disable_reason).to be_nil
+      end
+
+      it "is disabled on disable date" do
+        allow(Date).to receive(:today).and_return(Date.parse(disable_date))
+        expect(f.deprecated?).to be(true)
+        expect(f.deprecation_reason).to be(:unmaintained)
+        expect(f.disabled?).to be(true)
+        expect(f.disable_reason).to be(:unsupported)
+      end
+    end
+
+    context "with both dates provided in incorrect order" do
+      let(:f) do
+        deprecation_date_ = deprecation_date
+        disable_date_ = disable_date
+        formula "foo" do
+          url "foo-1.0"
+          disable! date: disable_date_.to_s, because: :unsupported
+          deprecate! date: deprecation_date_.to_s, because: :unmaintained
+        end
+      end
+
+      it "is not deprecated before deprecation date" do
+        allow(Date).to receive(:today).and_return(Date.parse(deprecation_date) - 1)
+        expect(f.deprecated?).to be(false)
+        expect(f.deprecation_reason).to be_nil
+        expect(f.disabled?).to be(false)
+        expect(f.disable_reason).to be_nil
+      end
+
+      it "is deprecated on deprecation date" do
+        allow(Date).to receive(:today).and_return(Date.parse(deprecation_date))
+        expect(f.deprecated?).to be(true)
+        expect(f.deprecation_reason).to be(:unmaintained)
+        expect(f.disabled?).to be(false)
+        expect(f.disable_reason).to be_nil
+      end
+
+      it "is disabled on disable date" do
+        allow(Date).to receive(:today).and_return(Date.parse(disable_date))
+        expect(f.deprecated?).to be(true)
+        expect(f.deprecation_reason).to be(:unmaintained)
+        expect(f.disabled?).to be(true)
+        expect(f.disable_reason).to be(:unsupported)
+      end
+    end
+
+    context "with only disable date" do
+      let(:f) do
+        disable_date_ = disable_date
+        formula "foo" do
+          url "foo-1.0"
+          disable! date: disable_date_.to_s, because: :unsupported
+        end
+      end
+
+      it "is deprecated before disable date" do
+        allow(Date).to receive(:today).and_return(Date.parse(disable_date) << 12)
+        expect(f.deprecated?).to be(true)
+        expect(f.deprecation_reason).to be(:unsupported)
+        expect(f.disabled?).to be(false)
+        expect(f.disable_reason).to be_nil
+      end
+
+      it "is disabled on disable date" do
+        allow(Date).to receive(:today).and_return(Date.parse(disable_date))
+        expect(f.disabled?).to be(true)
+        expect(f.disable_reason).to be(:unsupported)
+      end
     end
   end
 end

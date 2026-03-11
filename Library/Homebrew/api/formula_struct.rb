@@ -9,6 +9,7 @@ module Homebrew
     class FormulaStruct < T::Struct
       sig { params(formula_hash: T::Hash[String, T.untyped]).returns(FormulaStruct) }
       def self.from_hash(formula_hash)
+        formula_hash = ::Formula.deep_remove_placeholders(formula_hash)
         formula_hash = formula_hash.transform_keys(&:to_sym)
                                    .slice(*decorator.all_props)
                                    .compact_blank
@@ -28,6 +29,16 @@ module Homebrew
         :service_name,
         :stable,
       ].freeze
+
+      SKIP_SERIALIZATION = [
+        # Bottle checksums have special serialization done by the serialize_bottle method
+        :bottle_checksums,
+      ].freeze
+
+      SPECS = [:head, :stable].freeze
+
+      # :any_skip_relocation is the most common in homebrew/core
+      DEFAULT_CELLAR = :any_skip_relocation
 
       DependsOnArgs = T.type_alias do
         T.any(
@@ -75,7 +86,7 @@ module Homebrew
 
       # Changes to this struct must be mirrored in Homebrew::API::Formula.generate_formula_struct_hash
       const :aliases, T::Array[String], default: []
-      const :bottle_checksums, T::Array[T::Hash[Symbol, T.anything]], default: []
+      const :bottle_checksums, T::Array[T::Hash[Symbol, T.any(String, Symbol)]], default: []
       const :bottle_rebuild, Integer, default: 0
       const :caveats, T.nilable(String)
       const :conflicts, T::Array[[String, T::Hash[Symbol, String]]], default: []
@@ -83,7 +94,7 @@ module Homebrew
       const :desc, String
       const :disable_args, T::Hash[Symbol, T.nilable(T.any(String, Symbol))], default: {}
       const :head_dependencies, T::Array[DependsOnArgs], default: []
-      const :head_url_args, [String, T::Hash[Symbol, T.anything]]
+      const :head_url_args, [String, T::Hash[Symbol, T.anything]], default: ["", {}]
       const :head_uses_from_macos, T::Array[UsesFromMacOSArgs], default: []
       const :homepage, String
       const :keg_only_args, T::Array[T.any(String, Symbol)], default: []
@@ -101,11 +112,136 @@ module Homebrew
       const :service_run_kwargs, T::Hash[Symbol, Homebrew::Service::RunParam], default: {}
       const :stable_dependencies, T::Array[DependsOnArgs], default: []
       const :stable_checksum, T.nilable(String)
-      const :stable_url_args, [String, T::Hash[Symbol, T.anything]]
+      const :stable_url_args, [String, T::Hash[Symbol, T.anything]], default: ["", {}]
       const :stable_uses_from_macos, T::Array[UsesFromMacOSArgs], default: []
       const :stable_version, String
       const :version_scheme, Integer, default: 0
       const :versioned_formulae, T::Array[String], default: []
+
+      sig { params(other: T.anything).returns(T::Boolean) }
+      def ==(other)
+        case other
+        when FormulaStruct
+          serialize == other.serialize
+        else
+          false
+        end
+      end
+
+      sig { params(bottle_tag: ::Utils::Bottles::Tag).returns(T.nilable(T::Hash[String, T.untyped])) }
+      def serialize_bottle(bottle_tag: ::Utils::Bottles.tag)
+        bottle_collector = ::Utils::Bottles::Collector.new
+        bottle_checksums.each do |bottle_info|
+          bottle_info = bottle_info.dup
+          cellar = bottle_info.delete(:cellar) || :any
+          tag = T.must(bottle_info.keys.first)
+          checksum = T.cast(bottle_info.values.first, String)
+
+          bottle_collector.add(
+            ::Utils::Bottles::Tag.from_symbol(tag),
+            checksum: Checksum.new(checksum),
+            cellar:,
+          )
+        end
+        return unless (bottle_spec = bottle_collector.specification_for(bottle_tag))
+
+        tag = (bottle_spec.tag if bottle_spec.tag != bottle_tag)
+        cellar = (bottle_spec.cellar if bottle_spec.cellar != DEFAULT_CELLAR)
+
+        {
+          "bottle_tag"      => tag&.to_sym,
+          "bottle_cellar"   => cellar,
+          "bottle_checksum" => bottle_spec.checksum.to_s,
+        }
+      end
+
+      sig { params(bottle_tag: ::Utils::Bottles::Tag).returns(T::Hash[String, T.untyped]) }
+      def serialize(bottle_tag: ::Utils::Bottles.tag)
+        hash = self.class.decorator.all_props.filter_map do |prop|
+          next if PREDICATES.any? { |predicate| prop == :"#{predicate}_present" }
+          next if SKIP_SERIALIZATION.include?(prop)
+
+          [prop.to_s, send(prop)]
+        end.to_h
+
+        if (bottle_hash = serialize_bottle(bottle_tag:))
+          hash = hash.merge(bottle_hash)
+        end
+
+        hash = ::Utils.deep_stringify_symbols(hash)
+        ::Utils.deep_compact_blank(hash)
+      end
+
+      sig { params(hash: T::Hash[String, T.untyped], bottle_tag: ::Utils::Bottles::Tag).returns(FormulaStruct) }
+      def self.deserialize(hash, bottle_tag: ::Utils::Bottles.tag)
+        hash = ::Utils.deep_unstringify_symbols(hash)
+
+        # Items that don't follow the `hash["foo_present"] = hash["foo_args"].present?` pattern are overridden below
+        PREDICATES.each do |name|
+          hash["#{name}_present"] = hash["#{name}_args"].present?
+        end
+
+        if (bottle_checksum = hash["bottle_checksum"])
+          tag = hash.fetch("bottle_tag", bottle_tag.to_sym)
+          cellar = hash.fetch("bottle_cellar", DEFAULT_CELLAR)
+
+          hash["bottle_present"] = true
+          hash["bottle_checksums"] = [{ cellar: cellar, tag => bottle_checksum }]
+        else
+          hash["bottle_present"] = false
+        end
+
+        # *_url_args need to be in [String, Hash] format, but the hash may have been dropped if empty
+        SPECS.each do |key|
+          if (url_args = hash["#{key}_url_args"])
+            hash["#{key}_present"] = true
+            hash["#{key}_url_args"] = format_arg_pair(url_args, last: {})
+          else
+            hash["#{key}_present"] = false
+          end
+
+          next unless (uses_from_macos = hash["#{key}_uses_from_macos"])
+
+          hash["#{key}_uses_from_macos"] = uses_from_macos.map do |args|
+            format_arg_pair(args, last: {})
+          end
+        end
+
+        hash["service_args"] = if (service_args = hash["service_args"])
+          service_args.map { |service_arg| format_arg_pair(service_arg, last: nil) }
+        end
+
+        hash["conflicts"] = if (conflicts = hash["conflicts"])
+          conflicts.map { |conflict| format_arg_pair(conflict, last: {}) }
+        end
+
+        from_hash(hash)
+      end
+
+      # Format argument pairs into proper [first, last] format if serialization has removed some elements.
+      # Pass a default value for last to be used when only one element is present.
+      #
+      #  format_arg_pair(["foo"], last: {})                       # => ["foo", {}]
+      #  format_arg_pair([{ "foo" => :build }], last: {})         # => [{ "foo" => :build }, {}]
+      #  format_arg_pair(["foo", { since: :catalina }], last: {}) # => ["foo", { since: :catalina }]
+      sig {
+        type_parameters(:U, :V)
+          .params(
+            args: T.any([T.type_parameter(:U)], [T.type_parameter(:U), T.type_parameter(:V)]),
+            last: T.type_parameter(:V),
+          ).returns([T.type_parameter(:U), T.type_parameter(:V)])
+      }
+      def self.format_arg_pair(args, last:)
+        args = case args
+        in [elem]
+          [elem, last]
+        in [elem1, elem2]
+          [elem1, elem2]
+        end
+
+        # The case above is exhaustive so args will never be nil, but sorbet cannot infer that.
+        T.must(args)
+      end
     end
   end
 end

@@ -36,7 +36,7 @@ module Patch
 end
 
 # An abstract class representing a patch embedded into a formula.
-class EmbeddedPatch
+class EmbeddedPatch # rubocop:todo Style/OneClassPerFile
   include Utils::Output::Mixin
   extend T::Helpers
 
@@ -66,8 +66,8 @@ class EmbeddedPatch
   def apply
     data = contents.gsub("@@HOMEBREW_PREFIX@@", HOMEBREW_PREFIX)
     if data.gsub!("HOMEBREW_PREFIX", HOMEBREW_PREFIX)
-      odeprecated "patch with HOMEBREW_PREFIX placeholder",
-                  "patch with @@HOMEBREW_PREFIX@@ placeholder"
+      odisabled "patch with HOMEBREW_PREFIX placeholder",
+                "patch with @@HOMEBREW_PREFIX@@ placeholder"
     end
     args = %W[-g 0 -f -#{strip}]
     Utils.safe_popen_write("patch", *args) { |p| p.write(data) }
@@ -80,7 +80,7 @@ class EmbeddedPatch
 end
 
 # A patch at the `__END__` of a formula file.
-class DATAPatch < EmbeddedPatch
+class DATAPatch < EmbeddedPatch # rubocop:todo Style/OneClassPerFile
   sig { returns(T.nilable(Pathname)) }
   attr_accessor :path
 
@@ -110,7 +110,7 @@ class DATAPatch < EmbeddedPatch
 end
 
 # A string containing a patch.
-class StringPatch < EmbeddedPatch
+class StringPatch < EmbeddedPatch # rubocop:todo Style/OneClassPerFile
   sig { params(strip: T.any(String, Symbol), str: String).void }
   def initialize(strip, str)
     super(strip)
@@ -124,7 +124,7 @@ class StringPatch < EmbeddedPatch
 end
 
 # A file containing a patch.
-class ExternalPatch
+class ExternalPatch # rubocop:todo Style/OneClassPerFile
   include Utils::Output::Mixin
 
   extend Forwardable
