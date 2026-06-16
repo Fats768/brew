@@ -1,7 +1,28 @@
 # typed: true
 # frozen_string_literal: true
 
-require "sorbet-runtime"
+begin
+  require "sorbet-runtime"
+rescue LoadError
+  warn "sorbet-runtime not available; running without sorbet runtime (sorbet-runtime require rescued in standalone/sorbet.rb)"
+  # Minimal stubs so the rest of this file can reference T and T::Configuration safely.
+  module T
+    module Configuration
+      def self.enable_final_checks_on_hooks; end
+
+      def self.call_validation_error_handler=(proc)
+        @call_validation_error_handler = proc
+      end
+
+      def self.inline_type_error_handler=(proc)
+        @inline_type_error_handler = proc
+      end
+    end
+
+    module Types; end
+  end
+end
+
 require "extend/module"
 
 # Disable runtime checking unless enabled.
