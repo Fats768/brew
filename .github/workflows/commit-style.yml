@@ -15,7 +15,7 @@ jobs:
       statuses: write
     steps:
       - name: Check commit format
-        uses: Homebrew/actions/check-commit-format@9af03b7ae3f9e2ae5c174f659d5c3909f7e7dbac # 2026.07.29.1
+        uses: Homebrew/actions/check-commit-format@8f3d1ec8a696b3b9d9a6c3696b6c73033cab69e4 # 2026.08.14.1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           check_package_commit_format: false
